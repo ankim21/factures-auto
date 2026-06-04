@@ -1,0 +1,66 @@
+from flask import Flask, request, jsonify
+import pdfplumber
+import io
+import csv
+
+app = Flask(__name__)
+
+# ---- load your mapping from a CSV (same logic as Sheet) ----
+def load_mapping(filepath):
+    rows = []
+    with open(filepath, newline='', encoding='utf-8') as f:
+        reader = csv.DictReader(f)  # expects headers: match_text, name
+        for row in reader:
+            rows.append({
+                "match": normalize(row["match_text"]),
+                "name": row["name"].strip()
+            })
+    return rows
+
+def normalize(s):
+    return s.upper().replace(" ", "").replace("-", "").replace(".", "")
+
+def find_match(norm_text, mapping):
+    for row in mapping:
+        if row["match"] and row["match"] in norm_text:
+            return row["name"]
+    return None
+
+# load once at startup, not on every request
+SUPPLIERS = load_mapping("suppliers.csv")
+CLIENTS   = load_mapping("clients.csv")
+
+# ---- the one endpoint ----
+@app.route("/parse-invoice", methods=["POST"])
+def parse_invoice():
+    if "file" not in request.files:
+        return jsonify({"error": "no file"}), 400
+
+    pdf_bytes = request.files["file"].read()
+
+    # extract text with pdfplumber
+    text = ""
+    with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+        for page in pdf.pages:
+            text += page.extract_text() or ""
+
+    norm = normalize(text)
+    supplier = find_match(norm, SUPPLIERS)
+    client   = find_match(norm, CLIENTS)
+
+    if not supplier or not client:
+        return jsonify({
+            "matched": False,
+            "supplier": supplier,
+            "client": client,
+            "reason": f"missing {'supplier' if not supplier else 'client'}"
+        }), 200  # 200 not 400 — n8n can handle the logic, it's not a server error
+
+    return jsonify({
+        "matched": True,
+        "supplier": supplier,
+        "client": client,
+    }), 200
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)
