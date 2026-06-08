@@ -7,6 +7,10 @@ import img2pdf
 
 app = Flask(__name__)
 
+@app.route("/", methods=["GET"])
+def health():
+    return jsonify({"status": "ok", "message": "invoice parser is running"}), 200
+
 ALLOWED_TYPES = (
     "application/pdf",
     "application/octet-stream",  # some clients send PDF with this type
